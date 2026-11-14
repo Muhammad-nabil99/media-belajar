@@ -199,6 +199,28 @@ function handlePost(): void {
         $kelas = null;
     }
 
+    // Sanitasi nilai embeddable (wajib integer 1 atau 0 agar tidak error di MariaDB strict mode)
+    $embeddable = 1;
+    if (isset($body['embeddable'])) {
+        if (is_bool($body['embeddable'])) {
+            $embeddable = $body['embeddable'] ? 1 : 0;
+        } elseif ($body['embeddable'] === '' || $body['embeddable'] === null) {
+            $embeddable = 1;
+        } else {
+            $embeddable = ($body['embeddable'] === 0 || $body['embeddable'] === '0') ? 0 : 1;
+        }
+    }
+
+    // Auto-isi contributor_name jika kosong dari profile
+    $contributorId = $body['contributor_id'] ?? $user['sub'];
+    $contributorName = trim($body['contributor_name'] ?? '');
+    if (!$contributorName) {
+        $stUser = $db->prepare('SELECT p.full_name, u.email FROM users u LEFT JOIN profiles p ON u.id = p.id WHERE u.id = ? LIMIT 1');
+        $stUser->execute([$contributorId]);
+        $uRow = $stUser->fetch();
+        $contributorName = ($uRow && !empty($uRow['full_name'])) ? $uRow['full_name'] : ($uRow['email'] ?? 'Kontributor');
+    }
+
     try {
         $st = $db->prepare('INSERT INTO media (id, slug, judul, deskripsi, thumbnail, jenis, jenjang, jenjangs, kelas, mapel, kompetensi_keahlian, link, embeddable, tags, status, contributor_id, contributor_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
         $st->execute([
@@ -214,11 +236,11 @@ function handlePost(): void {
             $body['mapel'] ?? null,
             $body['kompetensi_keahlian'] ?? null,
             $body['link'],
-            $body['embeddable'] ?? 1,
+            $embeddable,
             $tags,
             $body['status'] ?? 'pending',
-            $body['contributor_id'] ?? $user['sub'],
-            $body['contributor_name'] ?? null,
+            $contributorId,
+            $contributorName,
         ]);
 
         jsonResponse(['id' => $id], 201);
@@ -284,6 +306,18 @@ function handlePatch(): void {
         if ($key === 'kelas') {
             $val = ($val !== '' && $val !== 0 && $val !== null) ? (int) $val : null;
             if ($val !== null && ($val < 1 || $val > 12)) $val = null;
+        }
+        if ($key === 'embeddable') {
+            if (is_bool($val)) {
+                $val = $val ? 1 : 0;
+            } elseif ($val === '' || $val === null) {
+                $val = 1;
+            } else {
+                $val = ($val === 0 || $val === '0') ? 0 : 1;
+            }
+        }
+        if ($key === 'views') {
+            $val = (int) $val;
         }
         // Format ISO 8601 datetime to MySQL DATETIME
         if ($key === 'reviewed_at' && is_string($val) && !empty($val)) {
