@@ -1,10 +1,14 @@
 <?php
 /**
  * Site Settings API
- * GET   /api/settings.php           → Get public settings (registration_enabled, etc.)
- * PATCH /api/settings.php          → Update settings (admin only)
+ * Media Belajar BTIKP Sulawesi Tenggara
+ *
+ * GET   /api/settings.php           → Get public settings (registration status, turnstile, etc.)
+ * PATCH /api/settings.php           → Update settings (admin only)
  */
+
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/registration_helper.php';
 
 $method = $_SERVER['REQUEST_METHOD'];
 
@@ -21,70 +25,44 @@ switch ($method) {
         jsonResponse(['error' => 'Method not allowed'], 405);
 }
 
-function ensureSettingsTable(PDO $db): void {
-    $db->exec("CREATE TABLE IF NOT EXISTS site_settings (
-        setting_key VARCHAR(100) PRIMARY KEY,
-        setting_value TEXT NOT NULL,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-
-    // Insert default registration_enabled = '1' if not set
-    $stmt = $db->prepare("SELECT COUNT(*) FROM site_settings WHERE setting_key = 'registration_enabled'");
-    $stmt->execute();
-    if ($stmt->fetchColumn() == 0) {
-        $stmtInsert = $db->prepare("INSERT INTO site_settings (setting_key, setting_value) VALUES ('registration_enabled', '1')");
-        $stmtInsert->execute();
-    }
-}
-
 function handleGet(): void {
     $db = getDB();
-    ensureSettingsTable($db);
+    ensureRegistrationTables($db);
 
-    $stmt = $db->query("SELECT setting_key, setting_value FROM site_settings");
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $raw = getRawSettings($db);
+    $regStatus = calculateRegistrationStatus($raw);
 
     $result = [
-        'registration_enabled' => true,
-        'turnstile_enabled'    => defined('TURNSTILE_ENABLED') ? TURNSTILE_ENABLED : true,
+        'turnstile_enabled' => defined('TURNSTILE_ENABLED') ? TURNSTILE_ENABLED : true,
     ];
 
-    foreach ($rows as $r) {
-        if ($r['setting_key'] === 'registration_enabled') {
-            $result['registration_enabled'] = ($r['setting_value'] === '1' || $r['setting_value'] === 'true');
-        } else {
-            $result[$r['setting_key']] = $r['setting_value'];
+    // Sertakan semua setting umum dari database
+    foreach ($raw as $k => $v) {
+        if (!str_starts_with($k, 'registration_')) {
+            $result[$k] = $v;
         }
     }
+
+    // Gabungkan dengan kalkulasi status pendaftaran (WITA)
+    $result = array_merge($result, $regStatus);
 
     jsonResponse($result);
 }
 
 function handlePatch(): void {
     $user = requireAuth();
-    $uid = $user['sub'];
-    if (!userHasRole($uid, 'admin')) {
-        jsonResponse(['error' => 'Forbidden'], 403);
+    $uid = $user['sub'] ?? ($user['id'] ?? '');
+    if (!$uid || !userHasRole($uid, 'admin')) {
+        jsonResponse(['error' => 'Forbidden: Akses hanya untuk Administrator'], 403);
     }
 
     $data = json_decode(file_get_contents('php://input'), true);
     if (!is_array($data)) {
-        jsonResponse(['error' => 'Invalid data'], 400);
+        jsonResponse(['error' => 'Data input tidak valid'], 400);
     }
 
     $db = getDB();
-    ensureSettingsTable($db);
-
-    $stmt = $db->prepare("INSERT INTO site_settings (setting_key, setting_value) VALUES (:key, :val) ON DUPLICATE KEY UPDATE setting_value = :val2");
-
-    foreach ($data as $key => $val) {
-        $stringVal = is_bool($val) ? ($val ? '1' : '0') : (string)$val;
-        $stmt->execute([
-            ':key' => $key,
-            ':val' => $stringVal,
-            ':val2' => $stringVal,
-        ]);
-    }
+    saveRegistrationSettings($db, $data, $user);
 
     handleGet();
 }

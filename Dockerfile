@@ -27,11 +27,13 @@ RUN echo "upload_max_filesize = 50M" > /usr/local/etc/php/conf.d/uploads.ini \
 WORKDIR /var/www/html
 COPY . /var/www/html/
 
-# Atur permissions untuk folder uploads
+# Atur permissions untuk folder uploads dan artisan CLI
 RUN mkdir -p /var/www/html/uploads \
     && chown -R www-data:www-data /var/www/html \
     && chmod -R 755 /var/www/html \
-    && chmod -R 777 /var/www/html/uploads
+    && chmod -R 777 /var/www/html/uploads \
+    && chmod +x /var/www/html/artisan \
+    && ln -sf /var/www/html/artisan /usr/local/bin/artisan
 
 EXPOSE 80
 

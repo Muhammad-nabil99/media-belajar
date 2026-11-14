@@ -7,6 +7,7 @@
  * POST /api/auth.php?action=signout  (placeholder)
  */
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/registration_helper.php';
 
 $action = $_GET['action'] ?? '';
 
@@ -32,6 +33,9 @@ switch ($action) {
 }
 
 function handleRegister(): void {
+    // Validasi Gatekeeper: Tolak registrasi jika pendaftaran sedang ditutup (manual / jadwal)
+    requireRegistrationOpen();
+
     $body = jsonBody();
     $email    = trim($body['email'] ?? '');
     $password = $body['password'] ?? '';

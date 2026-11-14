@@ -1,0 +1,556 @@
+#!/usr/bin/env php
+<?php
+/**
+ * Artisan CLI Helper for Media Belajar BTIKP Sulawesi Tenggara
+ * Menyediakan perintah CLI praktis untuk migrasi & seeding database pada environment Docker.
+ *
+ * Penggunaan:
+ *   php artisan migrate
+ *   php artisan db:seed
+ *   php artisan migrate:status
+ */
+
+declare(strict_types=1);
+
+// Pastikan dijalankan melalui CLI
+if (php_sapi_name() !== 'cli') {
+    die("Hanya dapat dijalankan melalui terminal (CLI).\n");
+}
+
+require_once __DIR__ . '/api/config.php';
+require_once __DIR__ . '/api/registration_helper.php';
+
+$command = $argv[1] ?? 'help';
+
+switch ($command) {
+    case 'migrate':
+        runMigrate();
+        break;
+    case 'db:seed':
+        runSeed();
+        break;
+    case 'migrate:status':
+        runStatus();
+        break;
+    case 'auth:defaults':
+    case 'reset:defaults':
+    case 'reset:admin':
+        runAuthDefaults();
+        break;
+    case 'user:password':
+        runResetPassword($argv[2] ?? 'admin@btikpsultra.com', $argv[3] ?? 'admin123');
+        break;
+    case 'help':
+    default:
+        showHelp();
+        break;
+}
+
+function printSuccess(string $msg): void {
+    echo "\033[32m✔ " . $msg . "\033[0m\n";
+}
+
+function printInfo(string $msg): void {
+    echo "\033[36mℹ " . $msg . "\033[0m\n";
+}
+
+function printWarn(string $msg): void {
+    echo "\033[33m⚠ " . $msg . "\033[0m\n";
+}
+
+function printError(string $msg): void {
+    echo "\033[31m✖ " . $msg . "\033[0m\n";
+}
+
+function runMigrate(): void {
+    echo "\n\033[1;34m=== Menjalankan Migrasi Database Media Belajar ===\033[0m\n\n";
+
+    try {
+        $db = getDB();
+    } catch (\Throwable $e) {
+        printError("Gagal terhubung ke database: " . $e->getMessage());
+        exit(1);
+    }
+
+    $tables = [
+        'users' => "CREATE TABLE IF NOT EXISTS `users` (
+            `id` VARCHAR(64) PRIMARY KEY,
+            `email` VARCHAR(255) NOT NULL UNIQUE,
+            `encrypted_password` VARCHAR(255) NOT NULL,
+            `full_name` VARCHAR(255) NULL,
+            `email_confirmed_at` DATETIME NULL,
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'profiles' => "CREATE TABLE IF NOT EXISTS `profiles` (
+            `id` VARCHAR(64) PRIMARY KEY,
+            `full_name` VARCHAR(255) NULL,
+            `instansi` VARCHAR(255) NULL,
+            `bio` TEXT NULL,
+            `avatar_url` VARCHAR(255) NULL,
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT `fk_profiles_user` FOREIGN KEY (`id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'user_roles' => "CREATE TABLE IF NOT EXISTS `user_roles` (
+            `id` VARCHAR(64) PRIMARY KEY,
+            `user_id` VARCHAR(64) NOT NULL,
+            `role` VARCHAR(50) NOT NULL,
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_user_roles_user` (`user_id`),
+            INDEX `idx_user_roles_role` (`role`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'mata_pelajaran' => "CREATE TABLE IF NOT EXISTS `mata_pelajaran` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `jenjang` VARCHAR(50) NOT NULL,
+            `nama` VARCHAR(150) NOT NULL,
+            `urutan` INT DEFAULT 1,
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_mapel_jenjang` (`jenjang`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'kompetensi_keahlian' => "CREATE TABLE IF NOT EXISTS `kompetensi_keahlian` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `nama` VARCHAR(150) NOT NULL,
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'media' => "CREATE TABLE IF NOT EXISTS `media` (
+            `id` VARCHAR(64) PRIMARY KEY,
+            `slug` VARCHAR(255) NOT NULL UNIQUE,
+            `judul` VARCHAR(255) NOT NULL,
+            `deskripsi` TEXT NULL,
+            `thumbnail` VARCHAR(255) NULL,
+            `jenis` VARCHAR(50) NOT NULL,
+            `jenjang` VARCHAR(50) NOT NULL,
+            `jenjangs` TEXT NULL,
+            `kelas` INT NULL,
+            `mapel` VARCHAR(100) NULL,
+            `kompetensi_keahlian` VARCHAR(150) NULL,
+            `link` TEXT NULL,
+            `embeddable` TINYINT(1) DEFAULT 1,
+            `tags` TEXT NULL,
+            `views` INT DEFAULT 0,
+            `rating` DECIMAL(3,2) DEFAULT 0.00,
+            `status` VARCHAR(50) DEFAULT 'pending',
+            `contributor_id` VARCHAR(64) NULL,
+            `contributor_name` VARCHAR(255) NULL,
+            `reviewed_by` VARCHAR(64) NULL,
+            `reviewer_name` VARCHAR(255) NULL,
+            `reviewed_at` DATETIME NULL,
+            `rejection_note` TEXT NULL,
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_media_status` (`status`),
+            INDEX `idx_media_jenjang` (`jenjang`),
+            INDEX `idx_media_contributor` (`contributor_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'ratings' => "CREATE TABLE IF NOT EXISTS `ratings` (
+            `id` VARCHAR(64) PRIMARY KEY,
+            `media_id` VARCHAR(64) NOT NULL,
+            `user_id` VARCHAR(64) NOT NULL,
+            `score` TINYINT NOT NULL,
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uniq_rating_user_media` (`user_id`, `media_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'favorites' => "CREATE TABLE IF NOT EXISTS `favorites` (
+            `id` VARCHAR(64) PRIMARY KEY,
+            `user_id` VARCHAR(64) NOT NULL,
+            `media_id` VARCHAR(64) NOT NULL,
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uniq_favorite_user_media` (`user_id`, `media_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'site_settings' => "CREATE TABLE IF NOT EXISTS `site_settings` (
+            `setting_key` VARCHAR(100) PRIMARY KEY,
+            `setting_value` TEXT NOT NULL,
+            `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'registration_audit_logs' => "CREATE TABLE IF NOT EXISTS `registration_audit_logs` (
+            `id` INT AUTO_INCREMENT PRIMARY KEY,
+            `admin_id` VARCHAR(64) NULL,
+            `admin_email` VARCHAR(255) NULL,
+            `mode` VARCHAR(20) NOT NULL,
+            `manual_status` VARCHAR(20) NOT NULL,
+            `start_at` DATETIME NULL,
+            `end_at` DATETIME NULL,
+            `closed_message` TEXT NULL,
+            `computed_status` VARCHAR(20) NOT NULL,
+            `ip_address` VARCHAR(45) NULL,
+            `created_at` DATETIME NOT NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    ];
+
+    foreach ($tables as $name => $sql) {
+        $db->exec($sql);
+        printSuccess("Migrasi tabel `$name` selesai.");
+    }
+
+    // Pastikan nilai awal default pendaftaran tertutup
+    ensureRegistrationTables($db);
+    printSuccess("Inisialisasi tabel `site_settings` & `registration_audit_logs` selesai.");
+
+    echo "\n\033[32m✔ Seluruh migrasi database berhasil dieksekusi!\033[0m\n\n";
+}
+
+function runSeed(): void {
+    echo "\n\033[1;34m=== Menjalankan Database Seeding Media Belajar ===\033[0m\n\n";
+
+    try {
+        $db = getDB();
+    } catch (\Throwable $e) {
+        printError("Gagal terhubung ke database: " . $e->getMessage());
+        exit(1);
+    }
+
+    $backupFile = __DIR__ . '/backup.sql';
+
+    // Jika ada backup.sql, utamakan mengimpor data lengkap dari backup.sql
+    if (file_exists($backupFile)) {
+        printInfo("Ditemukan berkas cadangan 'backup.sql' (" . round(filesize($backupFile) / 1024 / 1024, 2) . " MB).");
+        printInfo("Mengimpor data produksi dari backup.sql...");
+
+        $imported = false;
+        $host = DB_HOST;
+        $port = DB_PORT;
+        $dbname = DB_NAME;
+        $user = DB_USER;
+        $pass = DB_PASS;
+
+        // Coba import via mariadb / mysql CLI
+        $cmd = sprintf(
+            'mariadb -h %s -P %s -u %s -p%s %s < %s 2>&1',
+            escapeshellarg($host),
+            escapeshellarg($port),
+            escapeshellarg($user),
+            escapeshellarg($pass),
+            escapeshellarg($dbname),
+            escapeshellarg($backupFile)
+        );
+        $output = [];
+        $ret = -1;
+        @exec($cmd, $output, $ret);
+
+        if ($ret !== 0) {
+            $cmdMysql = sprintf(
+                'mysql -h %s -P %s -u %s -p%s %s < %s 2>&1',
+                escapeshellarg($host),
+                escapeshellarg($port),
+                escapeshellarg($user),
+                escapeshellarg($pass),
+                escapeshellarg($dbname),
+                escapeshellarg($backupFile)
+            );
+            @exec($cmdMysql, $output, $ret);
+        }
+
+        if ($ret === 0) {
+            $imported = true;
+            printSuccess("Berhasil mengimpor seluruh data dari backup.sql ke database!");
+        } else {
+            // Fallback: jalankan batch per statement menggunakan PDO
+            try {
+                $sqlContent = file_get_contents($backupFile);
+                $db->setAttribute(PDO::ATTR_EMULATE_PREPARES, 1);
+                $db->exec($sqlContent);
+                $imported = true;
+                printSuccess("Berhasil mengimpor seluruh data dari backup.sql via PDO.");
+            } catch (\Throwable $t) {
+                printWarn("Import via script menemui kendala: " . $t->getMessage());
+                printInfo("Anda dapat mengimpor langsung dengan: docker exec -i media-belajar-db mariadb -u media_user -pmedia_password_rahasia media_belajar < backup.sql");
+            }
+        }
+
+        // Terapkan migrasi tabel baru (settings & audit logs) di atas data backup
+        ensureRegistrationTables($db);
+        printSuccess("Sinkronisasi tabel fitur pengaturan pendaftaran selesai.");
+
+        echo "\n\033[32m✔ Pemulihan database dari backup.sql selesai dengan sukses!\033[0m\n\n";
+        return;
+    }
+
+    // Pastikan tabel sudah terbentuk terlebih dahulu jika tidak ada backup.sql
+    runMigrate();
+
+    // 1. Seed Akun Default (Admin, Reviewer, Kontributor)
+    $users = [
+        [
+            'email'     => 'admin@btikpsultra.com',
+            'password'  => 'admin123',
+            'full_name' => 'Administrator BTIKP Sultra',
+            'instansi'  => 'BTIKP Dinas Pendidikan dan Kebudayaan Sulawesi Tenggara',
+            'role'      => 'admin',
+        ],
+        [
+            'email'     => 'reviewer@btikpsultra.com',
+            'password'  => 'reviewer123',
+            'full_name' => 'Tim Kurator & Reviewer Media',
+            'instansi'  => 'BTIKP Sultra',
+            'role'      => 'reviewer',
+        ],
+        [
+            'email'     => 'guru@btikpsultra.com',
+            'password'  => 'guru123',
+            'full_name' => 'Guru Kontributor Sultra',
+            'instansi'  => 'SMA Negeri 1 Kendari',
+            'role'      => 'kontributor',
+        ]
+    ];
+
+    foreach ($users as $u) {
+        $stCheck = $db->prepare("SELECT id FROM users WHERE email = ? LIMIT 1");
+        $stCheck->execute([$u['email']]);
+        $existingId = $stCheck->fetchColumn();
+
+        if ($existingId) {
+            printInfo("Akun {$u['email']} sudah ada (Dilewati).");
+        } else {
+            $userId = uuid4();
+            $hash = password_hash($u['password'], PASSWORD_BCRYPT);
+
+            $db->prepare("INSERT INTO users (id, email, encrypted_password, full_name, email_confirmed_at) VALUES (?, ?, ?, ?, NOW())")
+               ->execute([$userId, $u['email'], $hash, $u['full_name']]);
+
+            $db->prepare("INSERT INTO profiles (id, full_name, instansi) VALUES (?, ?, ?)")
+               ->execute([$userId, $u['full_name'], $u['instansi']]);
+
+            $db->prepare("INSERT INTO user_roles (id, user_id, role) VALUES (?, ?, ?)")
+               ->execute([uuid4(), $userId, $u['role']]);
+
+            printSuccess("Akun default dibuat: {$u['email']} (Peran: {$u['role']})");
+        }
+    }
+
+    // 2. Seed Data Mata Pelajaran
+    $countMapel = (int)$db->query("SELECT COUNT(*) FROM mata_pelajaran")->fetchColumn();
+    if ($countMapel === 0) {
+        $mapels = [
+            ['jenjang' => 'SD', 'nama' => 'Pendidikan Pancasila', 'urutan' => 1],
+            ['jenjang' => 'SD', 'nama' => 'Bahasa Indonesia', 'urutan' => 2],
+            ['jenjang' => 'SD', 'nama' => 'Matematika', 'urutan' => 3],
+            ['jenjang' => 'SD', 'nama' => 'IPAS', 'urutan' => 4],
+            ['jenjang' => 'SMP', 'nama' => 'Informatika', 'urutan' => 1],
+            ['jenjang' => 'SMP', 'nama' => 'Bahasa Inggris', 'urutan' => 2],
+            ['jenjang' => 'SMP', 'nama' => 'IPA Terpadu', 'urutan' => 3],
+            ['jenjang' => 'SMP', 'nama' => 'IPS Terpadu', 'urutan' => 4],
+            ['jenjang' => 'SMA', 'nama' => 'Fisika', 'urutan' => 1],
+            ['jenjang' => 'SMA', 'nama' => 'Kimia', 'urutan' => 2],
+            ['jenjang' => 'SMA', 'nama' => 'Biologi', 'urutan' => 3],
+            ['jenjang' => 'SMA', 'nama' => 'Ekonomi', 'urutan' => 4],
+            ['jenjang' => 'SMK', 'nama' => 'Dasar Program Keahlian', 'urutan' => 1],
+            ['jenjang' => 'SMK', 'nama' => 'Konsentrasi Keahlian', 'urutan' => 2],
+            ['jenjang' => 'SMK', 'nama' => 'Projek Kreatif dan Kewirausahaan', 'urutan' => 3],
+        ];
+
+        $stMapel = $db->prepare("INSERT INTO mata_pelajaran (jenjang, nama, urutan) VALUES (?, ?, ?)");
+        foreach ($mapels as $m) {
+            $stMapel->execute([$m['jenjang'], $m['nama'], $m['urutan']]);
+        }
+        printSuccess("Berhasil menyemai data master Mata Pelajaran.");
+    } else {
+        printInfo("Data master Mata Pelajaran sudah ada ($countMapel baris).");
+    }
+
+    // 3. Seed Data Kompetensi Keahlian SMK
+    $countKomp = (int)$db->query("SELECT COUNT(*) FROM kompetensi_keahlian")->fetchColumn();
+    if ($countKomp === 0) {
+        $komps = [
+            'Rekayasa Perangkat Lunak (RPL)',
+            'Teknik Komputer dan Jaringan (TKJ)',
+            'Desain Komunikasi Visual (DKV)',
+            'Animasi',
+            'Teknik Otomotif',
+            'Teknik Mesin',
+            'Manajemen Perkantoran dan Layanan Bisnis',
+            'Akuntansi dan Keuangan Lembaga',
+        ];
+
+        $stKomp = $db->prepare("INSERT INTO kompetensi_keahlian (nama) VALUES (?)");
+        foreach ($komps as $k) {
+            $stKomp->execute([$k]);
+        }
+        printSuccess("Berhasil menyemai data master Kompetensi Keahlian SMK.");
+    } else {
+        printInfo("Data master Kompetensi Keahlian sudah ada ($countKomp baris).");
+    }
+
+    echo "\n\033[32m✔ Seeding database selesai!\033[0m\n\n";
+    echo "=========================================================\n";
+    echo "\033[1mKREDENSIAL DEFAULT UNTUK MASUK (LOGIN):\033[0m\n";
+    echo "1. Administrator:\n";
+    echo "   - Email    : admin@btikpsultra.com\n";
+    echo "   - Password : admin123\n";
+    echo "2. Reviewer:\n";
+    echo "   - Email    : reviewer@btikpsultra.com\n";
+    echo "   - Password : reviewer123\n";
+    echo "3. Kontributor (Guru):\n";
+    echo "   - Email    : guru@btikpsultra.com\n";
+    echo "   - Password : guru123\n";
+    echo "=========================================================\n\n";
+}
+
+function runStatus(): void {
+    echo "\n\033[1;34m=== Status Database Media Belajar ===\033[0m\n\n";
+
+    try {
+        $db = getDB();
+    } catch (\Throwable $e) {
+        printError("Gagal terhubung ke database: " . $e->getMessage());
+        exit(1);
+    }
+
+    $checkTables = ['users', 'profiles', 'user_roles', 'media', 'mata_pelajaran', 'kompetensi_keahlian', 'site_settings', 'registration_audit_logs'];
+
+    foreach ($checkTables as $t) {
+        try {
+            $c = $db->query("SELECT COUNT(*) FROM `$t`")->fetchColumn();
+            printSuccess("Tabel `$t`: OK ($c baris)");
+        } catch (\Exception $e) {
+            printWarn("Tabel `$t`: Belum ada (" . $e->getMessage() . ")");
+        }
+    }
+    echo "\n";
+}
+
+function runAuthDefaults(): void {
+    echo "\n\033[1;34m=== Sinkronisasi Akun Default (Admin, Reviewer, Guru) ===\033[0m\n\n";
+
+    try {
+        $db = getDB();
+    } catch (\Throwable $e) {
+        printError("Gagal terhubung ke database: " . $e->getMessage());
+        exit(1);
+    }
+
+    $defaultUsers = [
+        [
+            'email'     => 'admin@btikpsultra.com',
+            'password'  => 'admin123',
+            'full_name' => 'Administrator BTIKP Sultra',
+            'instansi'  => 'BTIKP Dinas Pendidikan dan Kebudayaan Sulawesi Tenggara',
+            'role'      => 'admin',
+        ],
+        [
+            'email'     => 'reviewer@btikpsultra.com',
+            'password'  => 'reviewer123',
+            'full_name' => 'Tim Kurator & Reviewer Media',
+            'instansi'  => 'BTIKP Sultra',
+            'role'      => 'reviewer',
+        ],
+        [
+            'email'     => 'guru@btikpsultra.com',
+            'password'  => 'guru123',
+            'full_name' => 'Guru Kontributor Sultra',
+            'instansi'  => 'SMA Negeri 1 Kendari',
+            'role'      => 'kontributor',
+        ]
+    ];
+
+    foreach ($defaultUsers as $u) {
+        $hash = password_hash($u['password'], PASSWORD_BCRYPT);
+        $st = $db->prepare("SELECT id FROM users WHERE email = ? LIMIT 1");
+        $st->execute([$u['email']]);
+        $existingId = $st->fetchColumn();
+
+        if ($existingId) {
+            $db->prepare("UPDATE users SET encrypted_password = ?, updated_at = NOW() WHERE id = ?")
+               ->execute([$hash, $existingId]);
+
+            $r = $db->prepare("SELECT id FROM user_roles WHERE user_id = ? AND role = ? LIMIT 1");
+            $r->execute([$existingId, $u['role']]);
+            if (!$r->fetch()) {
+                $db->prepare("INSERT INTO user_roles (id, user_id, role, created_at) VALUES (?, ?, ?, NOW())")
+                   ->execute([uuid4(), $existingId, $u['role']]);
+            }
+            printSuccess("Akun '{$u['email']}' diperbarui! Password: '{$u['password']}' (Peran: {$u['role']})");
+        } else {
+            $userId = uuid4();
+            $db->prepare("INSERT INTO users (id, email, encrypted_password, full_name, email_confirmed_at, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW(), NOW())")
+               ->execute([$userId, $u['email'], $hash, $u['full_name']]);
+
+            $db->prepare("INSERT INTO profiles (id, full_name, instansi, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())")
+               ->execute([$userId, $u['full_name'], $u['instansi']]);
+
+            $db->prepare("INSERT INTO user_roles (id, user_id, role, created_at) VALUES (?, ?, ?, NOW())")
+               ->execute([uuid4(), $userId, $u['role']]);
+
+            printSuccess("Akun baru '{$u['email']}' dibuat! Password: '{$u['password']}' (Peran: {$u['role']})");
+        }
+    }
+
+    echo "\n\033[1;32m✔ Seluruh kredensial default berhasil disinkronkan!\033[0m\n\n";
+    echo "=========================================================\n";
+    echo "\033[1mKREDENSIAL UNTUK MASUK (LOGIN):\033[0m\n";
+    echo "1. Administrator:\n";
+    echo "   - Email    : admin@btikpsultra.com\n";
+    echo "   - Password : admin123\n";
+    echo "2. Reviewer:\n";
+    echo "   - Email    : reviewer@btikpsultra.com\n";
+    echo "   - Password : reviewer123\n";
+    echo "3. Kontributor (Guru):\n";
+    echo "   - Email    : guru@btikpsultra.com\n";
+    echo "   - Password : guru123\n";
+    echo "=========================================================\n\n";
+}
+
+function runResetPassword(string $email, string $newPassword): void {
+    echo "\n\033[1;34m=== Reset Password Pengguna ===\033[0m\n\n";
+
+    try {
+        $db = getDB();
+    } catch (\Throwable $e) {
+        printError("Gagal terhubung ke database: " . $e->getMessage());
+        exit(1);
+    }
+
+    $hash = password_hash($newPassword, PASSWORD_BCRYPT);
+
+    $st = $db->prepare("SELECT id, email, full_name FROM users WHERE email = ? LIMIT 1");
+    $st->execute([$email]);
+    $user = $st->fetch();
+
+    if ($user) {
+        $up = $db->prepare("UPDATE users SET encrypted_password = ?, updated_at = NOW() WHERE id = ?");
+        $up->execute([$hash, $user['id']]);
+
+        printSuccess("Password untuk akun '{$email}' ({$user['full_name']}) berhasil direset!");
+    } else {
+        $userId = uuid4();
+        $ins = $db->prepare("INSERT INTO users (id, email, encrypted_password, full_name, email_confirmed_at, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW(), NOW())");
+        $ins->execute([$userId, $email, $hash, 'Pengguna']);
+
+        $db->prepare("INSERT INTO profiles (id, full_name, instansi, bio, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())")
+           ->execute([$userId, 'Pengguna', 'BTIKP Sulawesi Tenggara', 'Pengguna Sistem Media Belajar']);
+
+        $db->prepare("INSERT INTO user_roles (id, user_id, role, created_at) VALUES (?, ?, 'kontributor', NOW())")
+           ->execute([uuid4(), $userId]);
+
+        printSuccess("Akun baru '{$email}' berhasil dibuat!");
+    }
+
+    echo "\n\033[1mKredensial Login Sekarang:\033[0m\n";
+    echo "  Email    : \033[36m{$email}\033[0m\n";
+    echo "  Password : \033[36m{$newPassword}\033[0m\n\n";
+}
+
+function showHelp(): void {
+    echo <<<HELP
+
+\033[1;33mArtisan CLI Helper — Media Belajar BTIKP Sulawesi Tenggara\033[0m
+
+Perintah yang tersedia:
+  \033[32mphp artisan migrate\033[0m                       Membuat / memperbarui seluruh tabel database
+  \033[32mphp artisan db:seed\033[0m                       Menyemai data awal (Admin, Reviewer, Guru, Mapel, Keahlian)
+  \033[32mphp artisan migrate:status\033[0m                Memeriksa status dan jumlah baris tabel database
+  \033[32mphp artisan reset:admin\033[0m                   Reset password admin@btikpsultra.com ke admin123
+  \033[32mphp artisan user:password <email> <pass>\033[0m  Ubah password pengguna tertentu
+
+Contoh di Docker:
+  docker compose exec app php artisan reset:admin
+  docker compose exec app php artisan user:password admin@btikpsultra.com admin123
+
+HELP;
+}

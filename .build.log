@@ -1,0 +1,21 @@
+2026-11-01T15:56:13.519067 Project directory: /root/media-belajar
+2026-11-01T15:56:13.519422 Pulling project images
+2026-11-01T15:56:13.520320 ------------------------------
+2026-11-01T15:56:13.589318 time="2026-11-01T15:56:13Z" level=warning msg="/root/media-belajar/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+2026-11-01T15:56:13.653562  app Skipped No image to be pulled
+2026-11-01T15:56:13.653633  Image mariadb:10.11 Pulling 
+2026-11-01T15:56:15.770771  Image mariadb:10.11 Pulled 
+2026-11-01T15:56:15.774627 ------------------------------
+2026-11-01T15:56:15.774803 Deploying project
+2026-11-01T15:56:15.775539 ------------------------------
+2026-11-01T15:56:15.839733 time="2026-11-01T15:56:15Z" level=warning msg="/root/media-belajar/docker-compose.yml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion"
+2026-11-01T15:56:15.916437  Container media-belajar-db Recreate 
+2026-11-01T15:56:16.180467  Container media-belajar-db Recreated 
+2026-11-01T15:56:16.180534  Container media-belajar-app Recreate 
+2026-11-01T15:56:17.494333  Container media-belajar-app Recreated 
+2026-11-01T15:56:17.512107  Container media-belajar-db Starting 
+2026-11-01T15:56:17.781464  Container media-belajar-db Started 
+2026-11-01T15:56:17.781814  Container media-belajar-app Starting 
+2026-11-01T15:56:18.268894  Container media-belajar-app Started 
+2026-11-01T15:56:18.281956 ------------------------------
+2026-11-01T15:56:18.282014 Project deployed successfully
