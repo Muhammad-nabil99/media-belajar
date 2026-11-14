@@ -42,6 +42,13 @@ function ensureRegistrationTables(PDO $db): void {
         created_at DATETIME NOT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
+    // Pastikan kolom role pada tabel user_roles mendukung 'pending' atau VARCHAR agar tidak terjadi error 1265
+    try {
+        $db->exec("ALTER TABLE `user_roles` MODIFY COLUMN `role` VARCHAR(50) NOT NULL");
+    } catch (\Throwable $t) {
+        // Abaikan jika tabel belum ada atau sudah bertipe VARCHAR
+    }
+
     // Inisialisasi pengaturan awal dengan kondisi TERTUTUP jika belum pernah ada
     $defaults = [
         'registration_enabled'       => '0',

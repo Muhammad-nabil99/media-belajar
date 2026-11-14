@@ -72,9 +72,8 @@ function handleRegister(): void {
         $db->prepare('INSERT INTO profiles (id, full_name, instansi) VALUES (?, ?, ?)')
            ->execute([$userId, $name, $instansi ?: null]);
 
-        // Default role: pending (requires Admin approval in Pengguna Review)
-        $db->prepare('INSERT INTO user_roles (id, user_id, role) VALUES (?, ?, ?)')
-           ->execute([uuid4(), $userId, 'pending']);
+        // Catatan: Akun baru tidak langsung diberi entri di user_roles sampai disetujui Admin.
+        // Di API & Admin Panel, pengguna tanpa role otomatis berstatus 'pending'.
 
         $db->commit();
     } catch (\Exception $e) {

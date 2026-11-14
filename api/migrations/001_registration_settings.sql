@@ -37,3 +37,6 @@ CREATE TABLE IF NOT EXISTS `registration_audit_logs` (
     `ip_address` VARCHAR(45) NULL,
     `created_at` DATETIME NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 4. Perluas tipe role di tabel user_roles agar mendukung 'pending'
+ALTER TABLE `user_roles` MODIFY COLUMN `role` ENUM('admin', 'reviewer', 'kontributor', 'user', 'pending') NOT NULL;
